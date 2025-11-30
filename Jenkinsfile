@@ -2,9 +2,9 @@ pipeline {
   agent any
 
   environment {
-    DOCKERHUB_REPO = "ahmedlebshten/url-shortener"
+    DOCKERHUB_REPO = "khaledelnabawy1/shortlink-service"
     IMAGE_TAG = "${env.BUILD_NUMBER}"
-    CD_REPO = "https://github.com/Ahmedlebshten/ArgoCD-Pipeline.git"
+    CD_REPO = "https://github.com/Khaled-elnabawy/jenkins-argocd-cd.git"
     CD_REPO_PATH = "."
     DEPLOY_FILE = "deployment.yml"
   }
