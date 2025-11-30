@@ -56,7 +56,7 @@ pipeline {
             set -e
             rm -rf cd-repo
 
-            git clone https://${GIT_USER}:${GIT_PASS}@github.com/Ahmedlebshten/ArgoCD-Pipeline.git cd-repo
+            git clone https://${GIT_USER}:${GIT_PASS}@github.com/Khaled-elnabawy/jenkins-argocd-cd.git cd-repo
             cd cd-repo || exit 2
 
             cd "${CD_REPO_PATH}" || (echo "Path ${CD_REPO_PATH} not found" && exit 3)
