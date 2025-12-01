@@ -47,7 +47,7 @@ pipeline {
       steps {
         withCredentials([
           usernamePassword(
-            credentialsId: 'git-cred',
+            credentialsId: 'cd-repo-creds',   // <- عدلت هنا
             usernameVariable: 'GIT_USER',
             passwordVariable: 'GIT_PASS'
           )
@@ -71,23 +71,4 @@ pipeline {
             git --no-pager diff -- "${DEPLOY_FILE}" || true
 
             git config user.email "jenkins@ci.local"
-            git config user.name "jenkins"
-
-            if git diff --quiet; then
-              echo "No changes in ${DEPLOY_FILE}"
-            else
-              git add "${DEPLOY_FILE}"
-              git commit -m "ci: bump image to ${IMAGE_TAG}"
-              git push origin HEAD
-            fi
-          '''
-        }
-      }
-    }
-  }
-
-  post {
-    success { echo "Done: ${DOCKERHUB_REPO}:${IMAGE_TAG}" }
-    failure { echo "Failed" }
-  }
-}
+            git config user.nam
