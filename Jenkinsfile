@@ -9,10 +9,6 @@ pipeline {
     DEPLOY_FILE = "deployment.yml"
   }
 
-  parameters {
-    booleanParam(name: 'UPDATE_CD', defaultValue: true, description: 'Update CD repo after push?')
-  }
-
   stages {
 
     stage('Checkout') {
@@ -30,7 +26,11 @@ pipeline {
     stage('Docker Login') {
       steps {
         withCredentials([
-          usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')
+          usernamePassword(
+            credentialsId: 'dockerhub-credentials',
+            usernameVariable: 'DH_USER',
+            passwordVariable: 'DH_PASS'
+          )
         ]) {
           sh 'echo $DH_PASS | docker login -u $DH_USER --password-stdin'
         }
@@ -44,54 +44,41 @@ pipeline {
     }
 
     stage('Update CD repo (bump image tag)') {
-      when { expression { return params.UPDATE_CD } }
       steps {
-        // نفترض cd-repo-creds مخزن كـ Secret text (GIT token)
-        withCredentials([string(credentialsId: 'cd-repo-creds', variable: 'GIT_TOKEN')]) {
+        withCredentials([
+          usernamePassword(
+            credentialsId: 'git-cred',     // ← ← دي أهم نقطة
+            usernameVariable: 'GIT_USER',
+            passwordVariable: 'GIT_PASS'
+          )
+        ]) {
           sh '''
             set -e
             rm -rf cd-repo
 
-            REMOTE="${CD_REPO}"
-            # شكل URL مع token (لا تعرض التوكن في اللوج)
-            REMOTE_URL="https://x-access-token:${GIT_TOKEN}@${REMOTE#https://}"
+            git clone https://${GIT_USER}:${GIT_PASS}@github.com/Khaled-elnabawy/jenkins-argocd-cd.git cd-repo
+            cd cd-repo || exit 2
 
-            # تحقق من الوصول قبل الـ clone
-            if git ls-remote "${REMOTE_URL}" >/dev/null 2>&1; then
-              git clone "${REMOTE_URL}" cd-repo
-              cd cd-repo || exit 2
+            cd "${CD_REPO_PATH}" || (echo "Path ${CD_REPO_PATH} not found" && exit 3)
 
-              cd "${CD_REPO_PATH}" || (echo "Path ${CD_REPO_PATH} not found" && exit 3)
+            if [ ! -f "${DEPLOY_FILE}" ]; then
+              echo "ERROR: ${DEPLOY_FILE} not found under ${CD_REPO_PATH}"
+              exit 4
+            fi
 
-              if [ ! -f "${DEPLOY_FILE}" ]; then
-                echo "ERROR: ${DEPLOY_FILE} not found under ${CD_REPO_PATH}"
-                exit 4
-              fi
+            sed -i "s|image: ${DOCKERHUB_REPO}:.*|image: ${DOCKERHUB_REPO}:${IMAGE_TAG}|g" "${DEPLOY_FILE}"
 
-              NEW_IMAGE="${DOCKERHUB_REPO}:${IMAGE_TAG}"
+            git --no-pager diff -- "${DEPLOY_FILE}" || true
 
-              # حاول استخدام yq لو متاح، وإلا استخدم sed كبديل
-              if command -v yq >/dev/null 2>&1; then
-                yq e '.spec.template.spec.containers[] |= (select(.image == .image) .image = env(NEW_IMAGE))' -i "${DEPLOY_FILE}" || true
-              else
-                sed -i "s|image: ${DOCKERHUB_REPO}:.*|image: ${NEW_IMAGE}|g" "${DEPLOY_FILE}"
-              fi
+            git config user.email "jenkins@ci.local"
+            git config user.name "jenkins"
 
-              git --no-pager diff -- "${DEPLOY_FILE}" || true
-              git config user.email "jenkins@ci.local"
-              git config user.name "jenkins"
-
-              if git diff --quiet; then
-                echo "No changes in ${DEPLOY_FILE}"
-              else
-                git add "${DEPLOY_FILE}"
-                git commit -m "ci: bump image to ${IMAGE_TAG}" || true
-                if ! git push origin HEAD; then
-                  echo "Warning: git push failed (branch protection or permissions). Please check manually."
-                fi
-              fi
+            if git diff --quiet; then
+              echo "No changes in ${DEPLOY_FILE}"
             else
-              echo "CD repo not reachable — skipping CD update"
+              git add "${DEPLOY_FILE}"
+              git commit -m "ci: bump image to ${IMAGE_TAG}"
+              git push origin HEAD
             fi
           '''
         }
@@ -100,14 +87,7 @@ pipeline {
   }
 
   post {
-    always {
-      sh 'docker logout || true'
-    }
-    success {
-      echo "Done: ${DOCKERHUB_REPO}:${IMAGE_TAG}"
-    }
-    failure {
-      echo "Failed"
-    }
+    success { echo "Done: ${DOCKERHUB_REPO}:${IMAGE_TAG}" }
+    failure { echo "Failed" }
   }
 }
