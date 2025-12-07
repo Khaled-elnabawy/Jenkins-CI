@@ -47,7 +47,7 @@ pipeline {
       steps {
         withCredentials([
           usernamePassword(
-            credentialsId: 'git-cred',     // ← ← دي أهم نقطة
+            credentialsId: 'git-cred',   // ← استخدم git-cred هنا
             usernameVariable: 'GIT_USER',
             passwordVariable: 'GIT_PASS'
           )
