@@ -3,7 +3,7 @@ const cors = require("cors");
 const { customAlphabet } = require("nanoid");
 const db = require("./database");
 const path = require("path");
-const client = require("prom-client"); // ← إضافة
+const client = require("prom-client");
 
 const app = express();
 const PORT = 3000;
@@ -49,8 +49,13 @@ const requestDuration = new client.Histogram({
 
 // Metrics endpoint
 app.get('/metrics', async (req, res) => {
-  res.set('Content-Type', register.contentType);
-  res.end(await register.metrics());
+  try {
+    res.set('Content-Type', register.contentType);
+    res.end(await register.metrics());
+  } catch (err) {
+    console.error("Error collecting metrics:", err);
+    res.status(500).send('Error collecting metrics');
+  }
 });
 // ===== End Prometheus Setup =====
 
@@ -61,8 +66,8 @@ app.use(express.static("public"));
 
 // API: Shorten URL
 app.post("/api/shorten", (req, res) => {
-  const start = Date.now(); // ← قياس الوقت
-  
+  const start = Date.now();
+
   const { url } = req.body;
   if (!url) {
     const duration = (Date.now() - start) / 1000;
@@ -81,10 +86,10 @@ app.post("/api/shorten", (req, res) => {
 
   const shortCode = nanoid();
   const query = `INSERT INTO urls (short_code, original_url) VALUES (?, ?)`;
-  
+
   db.run(query, [shortCode, url], function (err) {
     const duration = (Date.now() - start) / 1000;
-    
+
     if (err) {
       console.error("Error inserting URL:", err.message);
       requestDuration.labels('POST', '/api/shorten', '500').observe(duration);
@@ -95,7 +100,11 @@ app.post("/api/shorten", (req, res) => {
     urlCreationCounter.inc();
     requestDuration.labels('POST', '/api/shorten', '200').observe(duration);
 
-    const shortUrl = `http://localhost:${PORT}/${shortCode}`;
+    // use request host so link works behind LB/Ingress
+    const host = req.get('host') || `localhost:${PORT}`;
+    const protocol = req.protocol || 'http';
+    const shortUrl = `${protocol}://${host}/${shortCode}`;
+
     res.json({
       shortUrl,
       shortCode,
@@ -106,20 +115,20 @@ app.post("/api/shorten", (req, res) => {
 
 // Redirect short URL to original URL
 app.get("/:shortCode", (req, res) => {
-  const start = Date.now(); // ← قياس الوقت
-  
+  const start = Date.now();
+
   const { shortCode } = req.params;
 
-  // Skip API routes
+  // Skip API routes (if someone calls /api or /metrics directly)
   if (shortCode === "api" || shortCode === "metrics") {
-    return;
+    return res.status(404).send("Not found");
   }
 
   const query = `SELECT id, original_url FROM urls WHERE short_code = ?`;
-  
+
   db.get(query, [shortCode], (err, row) => {
     const duration = (Date.now() - start) / 1000;
-    
+
     if (err) {
       console.error("Error fetching URL:", err.message);
       requestDuration.labels('GET', '/:shortCode', '500').observe(duration);
@@ -140,7 +149,7 @@ app.get("/:shortCode", (req, res) => {
           last_accessed_at = CURRENT_TIMESTAMP 
       WHERE id = ?
     `;
-    
+
     db.run(updateQuery, [row.id], (err) => {
       if (err) {
         console.error("Error updating access count:", err.message);
@@ -151,12 +160,12 @@ app.get("/:shortCode", (req, res) => {
     const userAgent = req.headers["user-agent"] || "";
     const ipAddress = req.ip || req.connection.remoteAddress || "";
     const referrer = req.headers["referer"] || req.headers["referrer"] || "";
-    
+
     const analyticsQuery = `
       INSERT INTO url_analytics (url_id, user_agent, ip_address, referrer)
       VALUES (?, ?, ?, ?)
     `;
-    
+
     db.run(analyticsQuery, [row.id, userAgent, ipAddress, referrer], (err) => {
       if (err) {
         console.error("Error logging analytics:", err.message);
